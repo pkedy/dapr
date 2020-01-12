@@ -29,16 +29,7 @@ func NewDaprComponent(client *KubeClient, ns string, comp ComponentDescription) 
 func (do *DaprComponent) addComponent() (*v1alpha1.Component, error) {
 	client := do.kubeClient.DaprComponents(DaprTestNamespace)
 
-	metadata := []v1alpha1.MetadataItem{}
-
-	for k, v := range do.component.MetaData {
-		metadata = append(metadata, v1alpha1.MetadataItem{
-			Name:  k,
-			Value: v,
-		})
-	}
-
-	obj := buildDaprComponentObject(do.component.Name, do.component.TypeName, metadata)
+	obj := buildDaprComponentObject(do.component.Name, do.component.TypeName, do.component.Config)
 	return client.Create(obj)
 }
 

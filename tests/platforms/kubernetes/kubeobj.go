@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 
+	values_v1alpha1 "github.com/dapr/dapr/pkg/apis/values/v1alpha1"
 	v1alpha1 "github.com/dapr/dapr/pkg/apis/components/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	apiv1 "k8s.io/api/core/v1"
@@ -129,7 +130,7 @@ func buildServiceObject(namespace string, appDesc AppDescription) *apiv1.Service
 }
 
 // buildDaprComponentObject creates dapr component object
-func buildDaprComponentObject(componentName string, typeName string, metaData []v1alpha1.MetadataItem) *v1alpha1.Component {
+func buildDaprComponentObject(componentName string, typeName string, config values_v1alpha1.Values) *v1alpha1.Component {
 	return &v1alpha1.Component{
 		TypeMeta: metav1.TypeMeta{
 			Kind: DaprComponentsKind,
@@ -139,7 +140,7 @@ func buildDaprComponentObject(componentName string, typeName string, metaData []
 		},
 		Spec: v1alpha1.ComponentSpec{
 			Type:     typeName,
-			Metadata: metaData,
+			Config: config,
 		},
 	}
 }

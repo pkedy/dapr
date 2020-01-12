@@ -6,6 +6,7 @@
 package v1alpha1
 
 import (
+	values_v1alpha1 "github.com/dapr/dapr/pkg/apis/values/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -26,21 +27,8 @@ type Component struct {
 
 // ComponentSpec is the spec for a component
 type ComponentSpec struct {
-	Type     string         `json:"type"`
-	Metadata []MetadataItem `json:"metadata"`
-}
-
-// MetadataItem is a name/value pair for a metadata
-type MetadataItem struct {
-	Name         string       `json:"name"`
-	Value        string       `json:"value"`
-	SecretKeyRef SecretKeyRef `json:"secretKeyRef,omitempty"`
-}
-
-// SecretKeyRef is a reference to a secret holding the value for the metadata item. Name is the secret name, and key is the field in the secret.
-type SecretKeyRef struct {
-	Name string `json:"name"`
-	Key  string `json:"key"`
+	Type   string      `json:"type"`
+	Config values_v1alpha1.Values `json:"config"`
 }
 
 // Auth represents authentication details for the component

@@ -38,12 +38,14 @@ require (
 	github.com/valyala/fasthttp v1.6.0
 	go.opencensus.io v0.22.1
 	golang.org/x/exp v0.0.0-20190927203820-447a159532ef // indirect
+	golang.org/x/net v0.0.0-20191209160850-c0dbc17a3553 // indirect
 	golang.org/x/sync v0.0.0-20190911185100-cd5d95a43a6e // indirect
+	golang.org/x/sys v0.0.0-20200107162124-548cf772de50 // indirect
 	golang.org/x/time v0.0.0-20190921001708-c4c64cad1fd0 // indirect
 	gonum.org/v1/gonum v0.0.0-20190911200027-40d3308efe80 // indirect
 	google.golang.org/appengine v1.6.4 // indirect
-	google.golang.org/genproto v0.0.0-20190927181202-20e1ac93f88c // indirect
-	google.golang.org/grpc v1.24.0
+	google.golang.org/genproto v0.0.0-20200108215221-bd8f9a0ef82f // indirect
+	google.golang.org/grpc v1.26.0
 	gopkg.in/yaml.v2 v2.2.4
 	k8s.io/api v0.17.0
 	k8s.io/apimachinery v0.17.0

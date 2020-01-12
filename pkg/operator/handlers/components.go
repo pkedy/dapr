@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"time"
 
-	log "github.com/sirupsen/logrus"
 	components_v1alpha1 "github.com/dapr/dapr/pkg/apis/components/v1alpha1"
+	values_v1alpha1 "github.com/dapr/dapr/pkg/apis/values/v1alpha1"
 	pb "github.com/dapr/dapr/pkg/proto/daprinternal"
+	pb_values "github.com/dapr/dapr/pkg/proto/values"
+	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	corev1 "k8s.io/api/core/v1"
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -66,16 +68,7 @@ func (c *ComponentsHandler) publishComponentToDaprRuntimes(component *components
 		},
 	}
 
-	for _, m := range component.Spec.Metadata {
-		payload.Spec.Metadata = append(payload.Spec.Metadata, &pb.ComponentMetadataItem{
-			Name:  m.Name,
-			Value: m.Value,
-			SecretKeyRef: &pb.ComponentSecretKeyRef{
-				Name: m.SecretKeyRef.Name,
-				Key:  m.SecretKeyRef.Key,
-			},
-		})
-	}
+	payload.Spec.Config = convertValues(component.Spec.Config)
 
 	services, err := c.kubeClient.CoreV1().Services(meta_v1.NamespaceAll).List(meta_v1.ListOptions{
 		LabelSelector: labels.SelectorFromSet(map[string]string{daprEnabledAnnotationKey: "true"}).String(),
@@ -123,4 +116,72 @@ func (c *ComponentsHandler) updateDaprRuntime(component pb.Component, address st
 	if err != nil {
 		log.Warnf("error updating Dapr Runtime with component: %s", err)
 	}
+}
+
+func convertValues(values values_v1alpha1.Values) *pb_values.Values {
+	if values == nil {
+		return nil
+	}
+
+	var vals pb_values.Values
+	for k, v := range values {
+		switch v := v.(type) {
+		case string:
+			vals.ValueMap[k] = &pb_values.Values_Value{
+				Value: &pb_values.Values_Value_StringValue{StringValue: v},
+			}
+		case []string:
+			vals.ValueMap[k] = &pb_values.Values_Value{
+				Value: &pb_values.Values_Value_StringList{StringList: &pb_values.Values_StringList{Items: v}},
+			}
+		case int64:
+			vals.ValueMap[k] = &pb_values.Values_Value{
+				Value: &pb_values.Values_Value_Int64Value{Int64Value: v},
+			}
+		case []int64:
+			vals.ValueMap[k] = &pb_values.Values_Value{
+				Value: &pb_values.Values_Value_Int64List{Int64List: &pb_values.Values_Int64List{Items: v}},
+			}
+		case float64:
+			vals.ValueMap[k] = &pb_values.Values_Value{
+				Value: &pb_values.Values_Value_DoubleValue{DoubleValue: v},
+			}
+		case []float64:
+			vals.ValueMap[k] = &pb_values.Values_Value{
+				Value: &pb_values.Values_Value_DoubleList{DoubleList: &pb_values.Values_DoubleList{Items: v}},
+			}
+		case bool:
+			vals.ValueMap[k] = &pb_values.Values_Value{
+				Value: &pb_values.Values_Value_BoolValue{BoolValue: v},
+			}
+		case []bool:
+			vals.ValueMap[k] = &pb_values.Values_Value{
+				Value: &pb_values.Values_Value_BoolList{BoolList: &pb_values.Values_BoolList{Items: v}},
+			}
+		case []byte:
+			vals.ValueMap[k] = &pb_values.Values_Value{
+				Value: &pb_values.Values_Value_BytesValue{BytesValue: v},
+			}
+
+			// TODO: Convery time.Duration & time.Time
+			// Use gogo?
+			// case time.Time:
+			// 	vals.ValueMap[k] = &pb_values.Values_Value{
+			// 		Value: &pb_values.Values_Value_TimestampValue{TimestampValue: v},
+			// 	}
+			// case []time.Time:
+			// 	vals.ValueMap[k] = &pb_values.Values_Value{
+			// 		Value: &pb_values.Values_Value_TimestampList{TimestampList: &pb_values.Values_TimestampList{Items: v}},
+			// 	}
+			// case time.Duration:
+			// 	vals.ValueMap[k] = &pb_values.Values_Value{
+			// 		Value: &pb_values.Values_Value_DurationValue{DurationValue: v},
+			// 	}
+			// case []time.Duration:
+			// 	vals.ValueMap[k] = &pb_values.Values_Value{
+			// 		Value: &pb_values.Values_Value_DurationList{DurationList: &pb_values.Values_DurationList{Items: v}},
+			// 	}
+		}
+	}
+	return &vals
 }

@@ -9,10 +9,12 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/dapr/components-contrib/pubsub"
 	"github.com/dapr/components-contrib/secretstores"
 	components_v1alpha1 "github.com/dapr/dapr/pkg/apis/components/v1alpha1"
+	values_v1alpha1 "github.com/dapr/dapr/pkg/apis/values/v1alpha1"
 	"github.com/dapr/dapr/pkg/channel"
 	http_channel "github.com/dapr/dapr/pkg/channel/http"
 	channelt "github.com/dapr/dapr/pkg/channel/testing"
@@ -40,8 +42,13 @@ func (m *MockKubernetesStateStore) Init(metadata secretstores.Metadata) error {
 func (m *MockKubernetesStateStore) GetSecret(req secretstores.GetSecretRequest) (secretstores.GetSecretResponse, error) {
 	return secretstores.GetSecretResponse{
 		Data: map[string]string{
-			"key1":   "value1",
-			"_value": "_value_data",
+			"key1":            "value1",
+			"_value":          "_value_data",
+			"int_value":       "12345",
+			"float_value":     "1.5",
+			"bool_value":      "true",
+			"duration_value":  "5s",
+			"timestamp_value": "2002-10-02T10:00:00-05:00",
 		},
 	}, nil
 }
@@ -219,13 +226,10 @@ func TestInitSecretStores(t *testing.T) {
 
 func TestMetadataItemsToPropertiesConversion(t *testing.T) {
 	rt := NewTestDaprRuntime(modes.StandaloneMode)
-	items := []components_v1alpha1.MetadataItem{
-		{
-			Name:  "a",
-			Value: "b",
-		},
+	items := values_v1alpha1.Values{
+		"a": "b",
 	}
-	m := rt.convertMetadataItemsToProperties(items)
+	m := rt.convertValuesToProperties(items)
 	assert.Equal(t, 1, len(m))
 	assert.Equal(t, "b", m["a"])
 }
@@ -237,18 +241,12 @@ func TestProcessComponentSecrets(t *testing.T) {
 		},
 		Spec: components_v1alpha1.ComponentSpec{
 			Type: "bindings.mock",
-			Metadata: []components_v1alpha1.MetadataItem{
-				{
-					Name: "a",
-					SecretKeyRef: components_v1alpha1.SecretKeyRef{
-						Key:  "key1",
-						Name: "name1",
-					},
+			Config: values_v1alpha1.Values{
+				"a": map[string]interface{}{
+					"secret_key":  "key1",
+					"secret_name": "name1",
 				},
-				{
-					Name:  "b",
-					Value: "value2",
-				},
+				"b": "value2",
 			},
 		},
 		Auth: components_v1alpha1.Auth{
@@ -257,10 +255,9 @@ func TestProcessComponentSecrets(t *testing.T) {
 	}
 
 	t.Run("Standalone Mode", func(t *testing.T) {
-		mockBinding.Spec.Metadata[0].Value = ""
-		mockBinding.Spec.Metadata[0].SecretKeyRef = components_v1alpha1.SecretKeyRef{
-			Key:  "key1",
-			Name: "name1",
+		mockBinding.Spec.Config["a"] = map[string]interface{}{
+			"secret_key":  "key1",
+			"secret_name": "name1",
 		}
 
 		rt := NewTestDaprRuntime(modes.StandaloneMode)
@@ -284,53 +281,98 @@ func TestProcessComponentSecrets(t *testing.T) {
 		rt.initSecretStores()
 
 		mod := rt.processComponentSecrets(mockBinding)
-		assert.Equal(t, "value1", mod.Spec.Metadata[0].Value)
+		assert.Equal(t, "value1", mod.Spec.Config["a"])
 	})
 
-	t.Run("Kubernetes Mode", func(t *testing.T) {
-		mockBinding.Spec.Metadata[0].Value = ""
-		mockBinding.Spec.Metadata[0].SecretKeyRef = components_v1alpha1.SecretKeyRef{
-			Key:  "key1",
-			Name: "name1",
-		}
+	ts, _ := time.Parse(time.RFC3339Nano, "2002-10-02T10:00:00-05:00")
 
-		rt := NewTestDaprRuntime(modes.KubernetesMode)
-		m := NewMockKubernetesStore()
-		rt.secretStoresRegistry.Register(
-			secretstores_loader.New("kubernetes", func() secretstores.SecretStore {
-				return m
-			}),
-		)
+	tests := []struct {
+		name     string
+		config   map[string]interface{}
+		expected interface{}
+	}{
+		{
+			"Kubernetes Mode",
+			map[string]interface{}{
+				"secret_key":  "key1",
+				"secret_name": "name1",
+			},
+			"value1",
+		},
+		{
+			"Look up name only",
+			map[string]interface{}{
+				"secret_name": "name1",
+			},
+			"_value_data",
+		},
+		{
+			"Look up integer value",
+			map[string]interface{}{
+				"secret_key":      "int_value",
+				"secret_name":     "name1",
+				"secret_datatype": "integer",
+			},
+			int64(12345),
+		},
+		{
+			"Look up float value",
+			map[string]interface{}{
+				"secret_key":      "float_value",
+				"secret_name":     "name1",
+				"secret_datatype": "float",
+			},
+			float64(1.5),
+		},
+		{
+			"Look up boolean value",
+			map[string]interface{}{
+				"secret_key":      "bool_value",
+				"secret_name":     "name1",
+				"secret_datatype": "boolean",
+			},
+			true,
+		},
+		{
+			"Look up duration value",
+			map[string]interface{}{
+				"secret_key":      "duration_value",
+				"secret_name":     "name1",
+				"secret_datatype": "duration",
+			},
+			time.Duration(5 * time.Second),
+		},
+		{
+			"Look up timestamp value",
+			map[string]interface{}{
+				"secret_key":      "timestamp_value",
+				"secret_name":     "name1",
+				"secret_datatype": "timestamp",
+			},
+			ts,
+		},
+	}
 
-		// initSecretStore appends Kubernetes component even if kubernetes component is not added
-		err := rt.initSecretStores()
-		assert.NoError(t, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockBinding.Spec.Config["a"] = tt.config
 
-		mod := rt.processComponentSecrets(mockBinding)
-		assert.Equal(t, "value1", mod.Spec.Metadata[0].Value)
-	})
+			rt := NewTestDaprRuntime(modes.KubernetesMode)
+			m := NewMockKubernetesStore()
+			rt.secretStoresRegistry.Register(
+				secretstores_loader.New("kubernetes", func() secretstores.SecretStore {
+					return m
+				}),
+			)
 
-	t.Run("Look up name only", func(t *testing.T) {
-		mockBinding.Spec.Metadata[0].Value = ""
-		mockBinding.Spec.Metadata[0].SecretKeyRef = components_v1alpha1.SecretKeyRef{
-			Name: "name1",
-		}
+			// initSecretStore appends Kubernetes component even if kubernetes component is not added
+			err := rt.initSecretStores()
+			assert.NoError(t, err)
 
-		rt := NewTestDaprRuntime(modes.KubernetesMode)
-		m := NewMockKubernetesStore()
-		rt.secretStoresRegistry.Register(
-			secretstores_loader.New("kubernetes", func() secretstores.SecretStore {
-				return m
-			}),
-		)
-
-		// initSecretStore appends Kubernetes component even if kubernetes component is not added
-		err := rt.initSecretStores()
-		assert.NoError(t, err)
-
-		mod := rt.processComponentSecrets(mockBinding)
-		assert.Equal(t, "_value_data", mod.Spec.Metadata[0].Value)
-	})
+			mod := rt.processComponentSecrets(mockBinding)
+			assert.Equal(t, tt.expected, mod.Spec.Config["a"])
+		})
+	}
 }
 
 // Test InitSecretStore if secretstore.* refers to Kubernetes secret store
@@ -341,18 +383,12 @@ func TestInitSecretStoresInKubernetesMode(t *testing.T) {
 		},
 		Spec: components_v1alpha1.ComponentSpec{
 			Type: "secretstores.fake.secretstore",
-			Metadata: []components_v1alpha1.MetadataItem{
-				{
-					Name: "a",
-					SecretKeyRef: components_v1alpha1.SecretKeyRef{
-						Key:  "key1",
-						Name: "name1",
-					},
+			Config: values_v1alpha1.Values{
+				"a": map[string]interface{}{
+					"secret_key":  "key1",
+					"secret_name": "name1",
 				},
-				{
-					Name:  "b",
-					Value: "value2",
-				},
+				"b": "value2",
 			},
 		},
 		Auth: components_v1alpha1.Auth{
@@ -372,7 +408,7 @@ func TestInitSecretStoresInKubernetesMode(t *testing.T) {
 
 	err := rt.initSecretStores()
 	assert.NoError(t, err)
-	assert.Equal(t, "value1", fakeSecretStoreWithAuth.Spec.Metadata[0].Value)
+	assert.Equal(t, "value1", fakeSecretStoreWithAuth.Spec.Config["a"])
 }
 
 func TestOnNewPublishedMessage(t *testing.T) {
@@ -440,20 +476,11 @@ func getFakeProperties() map[string]string {
 	}
 }
 
-func getFakeMetadataItems() []components_v1alpha1.MetadataItem {
-	return []components_v1alpha1.MetadataItem{
-		{
-			Name:  "host",
-			Value: "localhost",
-		},
-		{
-			Name:  "password",
-			Value: "fakePassword",
-		},
-		{
-			Name:  "consumerID",
-			Value: TestRuntimeConfigID,
-		},
+func getFakeConfigValues() values_v1alpha1.Values {
+	return values_v1alpha1.Values{
+		"host":       "localhost",
+		"password":   "fakePassword",
+		"consumerID": TestRuntimeConfigID,
 	}
 }
 
@@ -481,8 +508,8 @@ func NewTestDaprRuntime(mode modes.DaprMode) *DaprRuntime {
 				Name: "Components",
 			},
 			Spec: components_v1alpha1.ComponentSpec{
-				Type:     "pubsub.mockPubSub",
-				Metadata: getFakeMetadataItems(),
+				Type:   "pubsub.mockPubSub",
+				Config: getFakeConfigValues(),
 			},
 		},
 	}

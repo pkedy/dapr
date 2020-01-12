@@ -84,7 +84,7 @@ func TestStartRunner(t *testing.T) {
 		{
 			Name:     "statestore",
 			TypeName: "state.fake",
-			MetaData: map[string]string{
+			Config: map[string]interface{}{
 				"address":  "localhost",
 				"password": "fakepassword",
 			},

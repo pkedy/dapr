@@ -16,11 +16,13 @@ import (
 	"github.com/dapr/components-contrib/state"
 	"github.com/dapr/dapr/pkg/actors"
 	components_v1alpha1 "github.com/dapr/dapr/pkg/apis/components/v1alpha1"
+	apis_v1alpha1 "github.com/dapr/dapr/pkg/apis/values/v1alpha1"
 	"github.com/dapr/dapr/pkg/channel"
 	"github.com/dapr/dapr/pkg/components"
 	"github.com/dapr/dapr/pkg/messaging"
 	dapr_pb "github.com/dapr/dapr/pkg/proto/dapr"
 	daprinternal_pb "github.com/dapr/dapr/pkg/proto/daprinternal"
+	values_pb "github.com/dapr/dapr/pkg/proto/values"
 	"github.com/golang/protobuf/ptypes/any"
 	durpb "github.com/golang/protobuf/ptypes/duration"
 	"github.com/golang/protobuf/ptypes/empty"
@@ -125,24 +127,63 @@ func (a *api) UpdateComponent(ctx context.Context, in *daprinternal_pb.Component
 		ObjectMeta: meta_v1.ObjectMeta{
 			Name: in.Metadata.Name,
 		},
+		Spec: components_v1alpha1.ComponentSpec{
+			Type:   in.Spec.Type,
+			Config: convertValues(in.Spec.Config),
+		},
 		Auth: components_v1alpha1.Auth{
 			SecretStore: in.Auth.SecretStore,
 		},
 	}
 
-	for _, m := range in.Spec.Metadata {
-		c.Spec.Metadata = append(c.Spec.Metadata, components_v1alpha1.MetadataItem{
-			Name:  m.Name,
-			Value: m.Value,
-			SecretKeyRef: components_v1alpha1.SecretKeyRef{
-				Key:  m.SecretKeyRef.Key,
-				Name: m.SecretKeyRef.Name,
-			},
-		})
-	}
-
 	a.componentsHandler.OnComponentUpdated(c)
 	return &empty.Empty{}, nil
+}
+
+func convertValues(in *values_pb.Values) apis_v1alpha1.Values {
+	return convertMap(in)
+}
+
+func convertMap(in *values_pb.Values) map[string]interface{} {
+	if in == nil {
+		return nil
+	}
+
+	v := map[string]interface{}{}
+	for key, value := range in.ValueMap {
+		switch val := value.Value.(type) {
+		case *values_pb.Values_Value_StringValue:
+			v[key] = val.StringValue
+		case *values_pb.Values_Value_StringList:
+			v[key] = val.StringList.Items
+		case *values_pb.Values_Value_Int64Value:
+			v[key] = val.Int64Value
+		case *values_pb.Values_Value_Int64List:
+			v[key] = val.Int64List.Items
+		case *values_pb.Values_Value_DoubleValue:
+			v[key] = val.DoubleValue
+		case *values_pb.Values_Value_DoubleList:
+			v[key] = val.DoubleList.Items
+		case *values_pb.Values_Value_BoolValue:
+			v[key] = val.BoolValue
+		case *values_pb.Values_Value_BoolList:
+			v[key] = val.BoolList.Items
+		case *values_pb.Values_Value_BytesValue:
+			v[key] = val.BytesValue
+		// TODO: Translate to time.Duration & time.Time
+		// Use gogo?
+		case *values_pb.Values_Value_TimestampValue:
+			v[key] = val.TimestampValue
+		case *values_pb.Values_Value_TimestampList:
+			v[key] = val.TimestampList.Items
+		case *values_pb.Values_Value_DurationValue:
+			v[key] = val.DurationValue
+		case *values_pb.Values_Value_DurationList:
+			v[key] = val.DurationList.Items
+		}
+	}
+
+	return v
 }
 
 func (a *api) PublishEvent(ctx context.Context, in *dapr_pb.PublishEventEnvelope) (*empty.Empty, error) {

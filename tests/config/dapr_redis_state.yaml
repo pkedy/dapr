@@ -9,10 +9,7 @@ metadata:
   name: statestore
 spec:
   type: state.redis
-  metadata:
-  - name: redisHost
-    value: dapr-redis-master:6379
-  - name: redisPassword
-    value: ""
-  - name: actorStateStore
-    value: "true"
+  config:
+    redisHost: dapr-redis-master:6379
+    redisPassword: ""
+    actorStateStore: "true"

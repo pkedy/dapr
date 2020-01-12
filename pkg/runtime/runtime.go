@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -27,6 +28,7 @@ import (
 	"github.com/dapr/components-contrib/state"
 	"github.com/dapr/dapr/pkg/actors"
 	components_v1alpha1 "github.com/dapr/dapr/pkg/apis/components/v1alpha1"
+	values_v1alpha1 "github.com/dapr/dapr/pkg/apis/values/v1alpha1"
 	"github.com/dapr/dapr/pkg/channel"
 	http_channel "github.com/dapr/dapr/pkg/channel/http"
 	"github.com/dapr/dapr/pkg/components"
@@ -57,6 +59,13 @@ const (
 	actorStateStore     = "actorStateStore"
 )
 
+const (
+	SecretKey      = "secret_key"
+	SecretName     = "secret_name"
+	SecretDatatype = "secret_datatype"
+	SecretStore    = "secret_store"
+)
+
 // DaprRuntime holds all the core components of the runtime
 type DaprRuntime struct {
 	runtimeConfig            *Config
@@ -84,6 +93,13 @@ type DaprRuntime struct {
 	hostAddress              string
 	actorStateStoreName      string
 	actorStateStoreCount     int
+}
+
+var secretKeys = map[string]struct{}{
+	SecretKey:      struct{}{},
+	SecretName:     struct{}{},
+	SecretDatatype: struct{}{},
+	SecretStore:    struct{}{},
 }
 
 // NewDaprRuntime returns a new runtime with the given runtime config and global config
@@ -227,7 +243,7 @@ func (a *DaprRuntime) buildHTTPPipeline() (http_middleware.Pipeline, error) {
 				a.globalConfig.Spec.HTTPPipelineSpec.Handlers[i].Type)
 		}
 		handler, err := a.httpMiddlewareRegistry.Create(a.globalConfig.Spec.HTTPPipelineSpec.Handlers[i].Type,
-			middleware.Metadata{Properties: a.convertMetadataItemsToProperties(component.Spec.Metadata)})
+			middleware.Metadata{Properties: a.convertValuesToProperties(component.Spec.Config)})
 		if err != nil {
 			return http_middleware.Pipeline{}, err
 		}
@@ -279,7 +295,7 @@ func (a *DaprRuntime) OnComponentUpdated(component components_v1alpha1.Component
 
 	for i, c := range a.components {
 		if c.Spec.Type == component.Spec.Type && c.ObjectMeta.Name == component.ObjectMeta.Name {
-			if reflect.DeepEqual(c.Spec.Metadata, component.Spec.Metadata) {
+			if reflect.DeepEqual(c.Spec.Config, component.Spec.Config) {
 				return
 			}
 
@@ -301,7 +317,7 @@ func (a *DaprRuntime) OnComponentUpdated(component components_v1alpha1.Component
 		}
 
 		err = store.Init(state.Metadata{
-			Properties: a.convertMetadataItemsToProperties(component.Spec.Metadata),
+			Properties: a.convertValuesToProperties(component.Spec.Config),
 		})
 		if err != nil {
 			log.Errorf("error on init state store: %s", err)
@@ -317,7 +333,7 @@ func (a *DaprRuntime) OnComponentUpdated(component components_v1alpha1.Component
 		}
 
 		err = binding.Init(bindings.Metadata{
-			Properties: a.convertMetadataItemsToProperties(component.Spec.Metadata),
+			Properties: a.convertValuesToProperties(component.Spec.Config),
 			Name:       component.ObjectMeta.Name,
 		})
 		if err == nil {
@@ -562,7 +578,7 @@ func (a *DaprRuntime) initInputBindings(registry bindings_loader.Registry) error
 				continue
 			}
 			err = binding.Init(bindings.Metadata{
-				Properties: a.convertMetadataItemsToProperties(c.Spec.Metadata),
+				Properties: a.convertValuesToProperties(c.Spec.Config),
 				Name:       c.ObjectMeta.Name,
 			})
 			if err != nil {
@@ -587,7 +603,7 @@ func (a *DaprRuntime) initOutputBindings(registry bindings_loader.Registry) erro
 
 			if binding != nil {
 				err := binding.Init(bindings.Metadata{
-					Properties: a.convertMetadataItemsToProperties(c.Spec.Metadata),
+					Properties: a.convertValuesToProperties(c.Spec.Config),
 				})
 				if err != nil {
 					log.Warnf("failed to init output binding %s: %s", c.Spec.Type, err)
@@ -611,7 +627,7 @@ func (a *DaprRuntime) initState(registry state_loader.Registry) error {
 				continue
 			}
 			if store != nil {
-				props := a.convertMetadataItemsToProperties(s.Spec.Metadata)
+				props := a.convertValuesToProperties(s.Spec.Config)
 				err := store.Init(state.Metadata{
 					Properties: props,
 				})
@@ -681,7 +697,7 @@ func (a *DaprRuntime) initExporters() error {
 				continue
 			}
 
-			properties := a.convertMetadataItemsToProperties(c.Spec.Metadata)
+			properties := a.convertValuesToProperties(c.Spec.Config)
 
 			err = exporter.Init(a.runtimeConfig.ID, a.hostAddress, exporters.Metadata{
 				Properties: properties,
@@ -704,7 +720,7 @@ func (a *DaprRuntime) initPubSub() error {
 				continue
 			}
 
-			properties := a.convertMetadataItemsToProperties(c.Spec.Metadata)
+			properties := a.convertValuesToProperties(c.Spec.Config)
 			properties["consumerID"] = a.runtimeConfig.ID
 
 			err = pubSub.Init(pubsub.Metadata{
@@ -879,45 +895,144 @@ func (a *DaprRuntime) Stop() {
 func (a *DaprRuntime) processComponentSecrets(component components_v1alpha1.Component) components_v1alpha1.Component {
 	cache := map[string]secretstores.GetSecretResponse{}
 
-	for i, m := range component.Spec.Metadata {
-		if m.SecretKeyRef.Name == "" {
-			continue
-		}
+	a.convertSecretRefsInMap(component.Auth.SecretStore, component.ObjectMeta.Namespace, cache, component.Spec.Config)
 
-		secretStore := a.getSecretStore(component.Auth.SecretStore)
-		if secretStore == nil {
-			continue
-		}
-
-		resp, ok := cache[m.SecretKeyRef.Name]
-		if !ok {
-			r, err := secretStore.GetSecret(secretstores.GetSecretRequest{
-				Name: m.SecretKeyRef.Name,
-				Metadata: map[string]string{
-					"namespace": component.ObjectMeta.Namespace,
-				},
-			})
-			if err != nil {
-				log.Errorf("error getting secret: %s", err)
-				continue
-			}
-			resp = r
-		}
-
-		// Use the default DefaultSecretRefKeyName key if SecretKeyRef.Key is not given
-		secretKeyName := m.SecretKeyRef.Key
-		if secretKeyName == "" {
-			secretKeyName = secretstores.DefaultSecretRefKeyName
-		}
-
-		val, ok := resp.Data[secretKeyName]
-		if ok {
-			component.Spec.Metadata[i].Value = val
-		}
-
-		cache[m.SecretKeyRef.Name] = resp
-	}
 	return component
+}
+
+// convertSecretRefsInMap recursives finds sercet ref maps and converts them to secret values from their secret stores.
+func (a *DaprRuntime) convertSecretRefsInMap(defaultStore string, namespace string, cache map[string]secretstores.GetSecretResponse, values map[string]interface{}) {
+	for k, value := range values {
+		switch v := value.(type) {
+		case map[string]interface{}:
+			if isSecretRef(v) {
+				if val, ok := a.convertSecretRef(defaultStore, namespace, cache, v); ok {
+					values[k] = val
+				}
+			} else {
+				a.convertSecretRefsInMap(defaultStore, namespace, cache, v)
+			}
+		case []interface{}:
+			for i, value := range v {
+				if m, ok := value.(map[string]interface{}); ok {
+					if isSecretRef(m) {
+						if val, ok := a.convertSecretRef(defaultStore, namespace, cache, m); ok {
+							v[i] = val
+						}
+					} else {
+						a.convertSecretRefsInMap(defaultStore, namespace, cache, m)
+					}
+				}
+			}
+		}
+	}
+}
+
+func (a *DaprRuntime) convertSecretRef(defaultStore string, namespace string, cache map[string]secretstores.GetSecretResponse, m map[string]interface{}) (interface{}, bool) {
+	secretKey, _ := m[SecretKey].(string)
+	secretName := m[SecretName].(string)
+	secretDatatype, _ := m[SecretDatatype].(string)
+	var secretStoreName string
+	if secretStoreVal, ok := m[SecretStore]; ok {
+		if secretStoreVal, ok := secretStoreVal.(string); ok {
+			secretStoreName = secretStoreVal
+		}
+	}
+	if secretStoreName == "" {
+		secretStoreName = defaultStore
+	}
+
+	secretStore := a.getSecretStore(secretStoreName)
+	if secretStore == nil {
+		return nil, false
+	}
+
+	resp, ok := cache[secretName]
+	if !ok {
+		r, err := secretStore.GetSecret(secretstores.GetSecretRequest{
+			Name: secretName,
+			Metadata: map[string]string{
+				"namespace": namespace,
+			},
+		})
+		if err != nil {
+			log.Errorf("error getting secret: %s", err)
+			return nil, false
+		}
+		resp = r
+	}
+
+	if secretKey == "" {
+		secretKey = secretstores.DefaultSecretRefKeyName
+	}
+
+	val, ok := resp.Data[secretKey]
+	cache[secretName] = resp
+
+	var valInterface interface{}
+	switch secretDatatype {
+	case "bool", "boolean":
+		v, err := strconv.ParseBool(val)
+		if err != nil {
+			log.Errorf("error converting secret to boolean")
+			return nil, false
+		}
+		valInterface = v
+	case "int", "integer":
+		v, err := strconv.ParseInt(val, 10, 63)
+		if err != nil {
+			log.Errorf("error converting secret to integer")
+			return nil, false
+		}
+		valInterface = v
+	case "float", "double":
+		v, err := strconv.ParseFloat(val, 63)
+		if err != nil {
+			log.Errorf("error converting secret to float")
+			return nil, false
+		}
+		valInterface = v
+	case "duration":
+		v, err := time.ParseDuration(val)
+		if err != nil {
+			log.Errorf("error converting secret to duration")
+			return nil, false
+		}
+		valInterface = v
+	case "timestamp":
+		v, err := time.Parse(time.RFC3339Nano, val)
+		if err != nil {
+			log.Errorf("error converting secret to timestamp")
+			return nil, false
+		}
+		valInterface = v
+	default:
+		valInterface = val
+	}
+
+	return valInterface, ok
+}
+
+// isSecretsRef checks that a map is a secrets ref.  The map must only contain
+// keys that are known secret keys that start with `secret_` and the values
+// must be strings.
+func isSecretRef(values map[string]interface{}) bool {
+	if len(values) < 1 {
+		return false
+	}
+
+	for key, value := range values {
+		// Check that the map key is a secret ref key.
+		if _, ok := secretKeys[key]; !ok {
+			return false
+		}
+		// Check that the value is a string.
+		if _, ok := value.(string); !ok {
+			return false
+		}
+	}
+
+	return true
 }
 
 func (a *DaprRuntime) getSecretStore(storeName string) secretstores.SecretStore {
@@ -1073,7 +1188,7 @@ func (a *DaprRuntime) initSecretStores() error {
 		}
 
 		err = secretStore.Init(secretstores.Metadata{
-			Properties: a.convertMetadataItemsToProperties(c.Spec.Metadata),
+			Properties: a.convertValuesToProperties(c.Spec.Config),
 		})
 		if err != nil {
 			log.Warnf("failed to init state store %s named %s: %s", c.Spec.Type, c.ObjectMeta.Name, err)
@@ -1086,10 +1201,11 @@ func (a *DaprRuntime) initSecretStores() error {
 	return nil
 }
 
-func (a *DaprRuntime) convertMetadataItemsToProperties(items []components_v1alpha1.MetadataItem) map[string]string {
+// TODO: Remove this one components can accept map[string]interface{}
+func (a *DaprRuntime) convertValuesToProperties(items values_v1alpha1.Values) map[string]string {
 	properties := map[string]string{}
-	for _, c := range items {
-		properties[c.Name] = c.Value
+	for k, v := range items {
+		properties[k] = fmt.Sprintf("%v", v)
 	}
 	return properties
 }

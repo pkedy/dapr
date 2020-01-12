@@ -1,0 +1,69 @@
+syntax = "proto3";
+
+package values;
+
+option go_package="github.com/dapr/dapr/pkg/proto/values";
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+message Values {
+  map<string, Value> value_map = 1;
+
+  // Specifies one value with different types possible.
+  message Value {
+    // The attribute value.
+    oneof value {
+      // Used for values of type STRING
+      string string_value = 1;
+      StringList string_list = 2;
+
+      // Used for values of type INT64
+      int64 int64_value = 3;
+      Int64List int64_list = 4;
+
+      // Used for values of type DOUBLE
+      double double_value = 5;
+      DoubleList double_list = 6;
+
+      // Used for values of type BOOL
+      bool bool_value = 7;
+      BoolList bool_list = 8;
+
+      // Used for values of type BYTES
+      bytes bytes_value = 9;
+
+      // Used for values of type TIMESTAMP
+      google.protobuf.Timestamp timestamp_value = 10;
+      TimestampList timestamp_list = 11;
+
+      // Used for values of type DURATION
+      google.protobuf.Duration duration_value = 12;
+      DurationList duration_list = 13;
+    }
+  }
+
+  message StringList {
+    repeated string items = 1;
+  }
+  
+  message Int64List {
+    repeated int64 items = 1;
+  }
+  
+  message DoubleList {
+    repeated double items = 1;
+  }
+  
+  message BoolList {
+    repeated bool items = 1;
+  }
+  
+  message TimestampList {
+    repeated google.protobuf.Timestamp items = 1;
+  }
+  
+  message DurationList {
+    repeated google.protobuf.Duration items = 1;
+  }
+}
