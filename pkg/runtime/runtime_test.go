@@ -149,7 +149,9 @@ func getSubscriptionsJSONString(topics []string, topics2 []string) string {
 		s = append(s, runtime_pubsub.Subscription{
 			PubsubName: TestPubsubName,
 			Topic:      t,
-			Route:      t,
+			Routes: []*runtime_pubsub.Route{
+				{Path: t},
+			},
 		})
 	}
 
@@ -157,7 +159,9 @@ func getSubscriptionsJSONString(topics []string, topics2 []string) string {
 		s = append(s, runtime_pubsub.Subscription{
 			PubsubName: TestSecondPubsubName,
 			Topic:      t,
-			Route:      t,
+			Routes: []*runtime_pubsub.Route{
+				{Path: t},
+			},
 		})
 	}
 	b, _ := json.Marshal(&s)
@@ -165,12 +169,14 @@ func getSubscriptionsJSONString(topics []string, topics2 []string) string {
 	return string(b)
 }
 
-func getSubscriptionCustom(topic, route string) string {
+func getSubscriptionCustom(topic, path string) string {
 	s := []runtime_pubsub.Subscription{
 		{
 			PubsubName: TestPubsubName,
 			Topic:      topic,
-			Route:      route,
+			Routes: []*runtime_pubsub.Route{
+				{Path: path},
+			},
 		},
 	}
 	b, _ := json.Marshal(&s)
@@ -180,7 +186,8 @@ func getSubscriptionCustom(topic, route string) string {
 func testDeclarativeSubscription() subscriptionsapi.Subscription {
 	return subscriptionsapi.Subscription{
 		TypeMeta: meta_v1.TypeMeta{
-			Kind: "Subscription",
+			Kind:       "Subscription",
+			APIVersion: "v1alpha1",
 		},
 		Spec: subscriptionsapi.SubscriptionSpec{
 			Topic:      "topic1",
@@ -814,10 +821,13 @@ func TestInitPubSub(t *testing.T) {
 
 		rts.runtimeConfig.Standalone.ComponentsPath = dir
 		subs := rts.getDeclarativeSubscriptions()
-		assert.Len(t, subs, 1)
-		assert.Equal(t, "topic1", subs[0].Topic)
-		assert.Equal(t, "myroute", subs[0].Route)
-		assert.Equal(t, "pubsub", subs[0].PubsubName)
+		if assert.Len(t, subs, 1) {
+			assert.Equal(t, "topic1", subs[0].Topic)
+			if assert.Len(t, subs[0].Routes, 1) {
+				assert.Equal(t, "myroute", subs[0].Routes[0].Path)
+			}
+			assert.Equal(t, "pubsub", subs[0].PubsubName)
+		}
 	})
 
 	t.Run("load declarative subscription, in scopes", func(t *testing.T) {
@@ -837,11 +847,14 @@ func TestInitPubSub(t *testing.T) {
 
 		rts.runtimeConfig.Standalone.ComponentsPath = dir
 		subs := rts.getDeclarativeSubscriptions()
-		assert.Len(t, subs, 1)
-		assert.Equal(t, "topic1", subs[0].Topic)
-		assert.Equal(t, "myroute", subs[0].Route)
-		assert.Equal(t, "pubsub", subs[0].PubsubName)
-		assert.Equal(t, TestRuntimeConfigID, subs[0].Scopes[0])
+		if assert.Len(t, subs, 1) {
+			assert.Equal(t, "topic1", subs[0].Topic)
+			if assert.Len(t, subs[0].Routes, 1) {
+				assert.Equal(t, "myroute", subs[0].Routes[0].Path)
+			}
+			assert.Equal(t, "pubsub", subs[0].PubsubName)
+			assert.Equal(t, TestRuntimeConfigID, subs[0].Scopes[0])
+		}
 	})
 
 	t.Run("load declarative subscription, not in scopes", func(t *testing.T) {
@@ -1636,6 +1649,7 @@ func TestErrorPublishedNonCloudEventHTTP(t *testing.T) {
 		topic:      topic,
 		data:       []byte("testing"),
 		metadata:   map[string]string{pubsubName: TestPubsubName},
+		path:       "topic1",
 	}
 
 	fakeReq := invokev1.NewInvokeMethodRequest(testPubSubMessage.topic)
@@ -1646,7 +1660,7 @@ func TestErrorPublishedNonCloudEventHTTP(t *testing.T) {
 	defer stopRuntime(t, rt)
 	rt.topicRoutes = map[string]TopicRoute{}
 	rt.topicRoutes[TestPubsubName] = TopicRoute{routes: make(map[string]Route)}
-	rt.topicRoutes[TestPubsubName].routes["topic1"] = Route{path: "topic1"}
+	rt.topicRoutes[TestPubsubName].routes["topic1"] = Route{routes: []*runtime_pubsub.Route{{Path: "topic1"}}}
 
 	t.Run("ok without result body", func(t *testing.T) {
 		mockAppChannel := new(channelt.MockAppChannel)
@@ -1745,6 +1759,7 @@ func TestErrorPublishedNonCloudEventGRPC(t *testing.T) {
 		topic:      topic,
 		data:       []byte("testing"),
 		metadata:   map[string]string{pubsubName: TestPubsubName},
+		path:       "topic1",
 	}
 
 	fakeReq := invokev1.NewInvokeMethodRequest(testPubSubMessage.topic)
@@ -1755,7 +1770,7 @@ func TestErrorPublishedNonCloudEventGRPC(t *testing.T) {
 	defer stopRuntime(t, rt)
 	rt.topicRoutes = map[string]TopicRoute{}
 	rt.topicRoutes[TestPubsubName] = TopicRoute{routes: make(map[string]Route)}
-	rt.topicRoutes[TestPubsubName].routes["topic1"] = Route{path: "topic1"}
+	rt.topicRoutes[TestPubsubName].routes["topic1"] = Route{routes: []*runtime_pubsub.Route{{Path: "topic1"}}}
 
 	testcases := []struct {
 		Name        string
@@ -1830,6 +1845,7 @@ func TestOnNewPublishedMessage(t *testing.T) {
 		topic:      topic,
 		data:       b,
 		metadata:   map[string]string{pubsubName: TestPubsubName},
+		path:       "topic1",
 	}
 
 	fakeReq := invokev1.NewInvokeMethodRequest(testPubSubMessage.topic)
@@ -1840,7 +1856,7 @@ func TestOnNewPublishedMessage(t *testing.T) {
 	defer stopRuntime(t, rt)
 	rt.topicRoutes = map[string]TopicRoute{}
 	rt.topicRoutes[TestPubsubName] = TopicRoute{routes: make(map[string]Route)}
-	rt.topicRoutes[TestPubsubName].routes["topic1"] = Route{path: "topic1"}
+	rt.topicRoutes[TestPubsubName].routes["topic1"] = Route{routes: []*runtime_pubsub.Route{{Path: "topic1"}}}
 
 	t.Run("succeeded to publish message to user app with empty response", func(t *testing.T) {
 		mockAppChannel := new(channelt.MockAppChannel)
@@ -1878,6 +1894,7 @@ func TestOnNewPublishedMessage(t *testing.T) {
 			topic:      topic,
 			data:       bNoTraceID,
 			metadata:   map[string]string{pubsubName: TestPubsubName},
+			path:       "topic1",
 		}
 
 		fakeReqNoTraceID := invokev1.NewInvokeMethodRequest(message.topic)
@@ -2092,6 +2109,7 @@ func TestOnNewPublishedMessageGRPC(t *testing.T) {
 		topic:      topic,
 		data:       b,
 		metadata:   map[string]string{pubsubName: TestPubsubName},
+		path:       "topic1",
 	}
 
 	envelope = pubsub.NewCloudEventsEnvelope("", "", pubsub.DefaultCloudEventType, "", topic, TestSecondPubsubName, "application/octet-stream", []byte{0x1}, "")
@@ -2103,6 +2121,7 @@ func TestOnNewPublishedMessageGRPC(t *testing.T) {
 		topic:      topic,
 		data:       base64,
 		metadata:   map[string]string{pubsubName: TestPubsubName},
+		path:       "topic1",
 	}
 
 	testCases := []struct {
@@ -2170,7 +2189,7 @@ func TestOnNewPublishedMessageGRPC(t *testing.T) {
 			rt.topicRoutes = map[string]TopicRoute{}
 			rt.topicRoutes[TestPubsubName] = TopicRoute{
 				routes: map[string]Route{
-					topic: {path: topic},
+					topic: {routes: []*runtime_pubsub.Route{{Path: topic}}},
 				},
 			}
 			var grpcServer *grpc.Server

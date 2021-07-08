@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	subscriptionsapi "github.com/dapr/dapr/pkg/apis/subscriptions/v1alpha1"
+	subscriptionsapi_v1alpha1 "github.com/dapr/dapr/pkg/apis/subscriptions/v1alpha1"
 	"github.com/dapr/kit/logger"
 )
 
@@ -21,30 +21,42 @@ func TestFilterSubscriptions(t *testing.T) {
 	subs := []Subscription{
 		{
 			Topic: "topic0",
-			Route: "topic0",
+			Routes: []*Route{
+				{
+					Path: "topic0",
+				},
+			},
 		},
 		{
 			Topic: "topic1",
 		},
 		{
 			Topic: "topic1",
-			Route: "custom/topic1",
+			Routes: []*Route{
+				{
+					Path: "custom/topic1",
+				},
+			},
 		},
 	}
 
 	subs = filterSubscriptions(subs, log)
-	assert.Len(t, subs, 2)
-	assert.Equal(t, "topic0", subs[0].Topic)
-	assert.Equal(t, "topic1", subs[1].Topic)
-	assert.Equal(t, "custom/topic1", subs[1].Route)
+	if assert.Len(t, subs, 2) {
+		assert.Equal(t, "topic0", subs[0].Topic)
+		assert.Equal(t, "topic1", subs[1].Topic)
+		if assert.Len(t, subs[1].Routes, 1) {
+			assert.Equal(t, "custom/topic1", subs[1].Routes[0].Path)
+		}
+	}
 }
 
-func testDeclarativeSubscription() subscriptionsapi.Subscription {
-	return subscriptionsapi.Subscription{
+func testDeclarativeSubscription() subscriptionsapi_v1alpha1.Subscription {
+	return subscriptionsapi_v1alpha1.Subscription{
 		TypeMeta: v1.TypeMeta{
-			Kind: "Subscription",
+			Kind:       "Subscription",
+			APIVersion: "v1alpha1",
 		},
-		Spec: subscriptionsapi.SubscriptionSpec{
+		Spec: subscriptionsapi_v1alpha1.SubscriptionSpec{
 			Topic:      "topic1",
 			Route:      "myroute",
 			Pubsubname: "pubsub",
@@ -55,7 +67,7 @@ func testDeclarativeSubscription() subscriptionsapi.Subscription {
 	}
 }
 
-func writeSubscriptionToDisk(subscription subscriptionsapi.Subscription, filePath string) {
+func writeSubscriptionToDisk(subscription subscriptionsapi_v1alpha1.Subscription, filePath string) {
 	b, _ := yaml.Marshal(subscription)
 	ioutil.WriteFile(filePath, b, 0600)
 }
@@ -73,12 +85,15 @@ func TestDeclarativeSubscriptions(t *testing.T) {
 		writeSubscriptionToDisk(s, filePath)
 
 		subs := DeclarativeSelfHosted(dir, log)
-		assert.Len(t, subs, 1)
-		assert.Equal(t, "topic1", subs[0].Topic)
-		assert.Equal(t, "myroute", subs[0].Route)
-		assert.Equal(t, "pubsub", subs[0].PubsubName)
-		assert.Equal(t, "scope1", subs[0].Scopes[0])
-		assert.Equal(t, "testValue", subs[0].Metadata["testName"])
+		if assert.Len(t, subs, 1) {
+			assert.Equal(t, "topic1", subs[0].Topic)
+			if assert.Len(t, subs[0].Routes, 1) {
+				assert.Equal(t, "myroute", subs[0].Routes[0].Path)
+			}
+			assert.Equal(t, "pubsub", subs[0].PubsubName)
+			assert.Equal(t, "scope1", subs[0].Scopes[0])
+			assert.Equal(t, "testValue", subs[0].Metadata["testName"])
+		}
 	})
 
 	t.Run("load multiple subscriptions", func(t *testing.T) {
@@ -96,14 +111,16 @@ func TestDeclarativeSubscriptions(t *testing.T) {
 		}
 
 		subs := DeclarativeSelfHosted(dir, log)
-		assert.Len(t, subs, 2)
-
-		for i := 0; i < 1; i++ {
-			assert.Equal(t, fmt.Sprintf("%v", i), subs[i].Topic)
-			assert.Equal(t, fmt.Sprintf("%v", i), subs[i].Route)
-			assert.Equal(t, fmt.Sprintf("%v", i), subs[i].PubsubName)
-			assert.Equal(t, fmt.Sprintf("%v", i), subs[i].Scopes[0])
-			assert.Equal(t, fmt.Sprintf("%v", i), subs[i].Metadata["testName"])
+		if assert.Len(t, subs, 2) {
+			for i := 0; i < 1; i++ {
+				assert.Equal(t, fmt.Sprintf("%v", i), subs[i].Topic)
+				if assert.Equal(t, 1, len(subs[i].Routes)) {
+					assert.Equal(t, fmt.Sprintf("%v", i), subs[i].Routes[0].Path)
+				}
+				assert.Equal(t, fmt.Sprintf("%v", i), subs[i].PubsubName)
+				assert.Equal(t, fmt.Sprintf("%v", i), subs[i].Scopes[0])
+				assert.Equal(t, fmt.Sprintf("%v", i), subs[i].Metadata["testName"])
+			}
 		}
 	})
 
